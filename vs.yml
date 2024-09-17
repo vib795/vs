@@ -10,7 +10,7 @@ stages {
                         pip install safety
                     '''
 
-                    // Run safety check and capture the console output in-memory
+                    // Run safety check, capture the output, and don't fail immediately
                     def safetyOutput = sh(script: '''
                         ./virtualenv/bin/safety check -r requirements.txt
                     ''', returnStdout: true).trim()
@@ -18,23 +18,29 @@ stages {
                     // Variable to track whether the pipeline should fail
                     def failPipeline = false
 
-                    // Parse the safety output line-by-line
+                    // Updated regex to match versions with any characters before and after 'b'
+                    def betaRegex = /[a-zA-Z0-9.]*b[a-zA-Z0-9]+/
+
+                    // Parse the output line-by-line
                     safetyOutput.eachLine { line ->
-                        if (line.contains("Vulnerability found")) {
-                            // Identify if the resolution is a beta version ('b')
-                            if (line.contains("b")) {
-                                echo "Vulnerability found with beta fix, ignoring: ${line}"
-                            } else if (line.contains("rc") || !line.contains("b")) {
+                        if (line.contains("ADVISORY:")) {
+                            // This is where the vulnerability resolution information is
+                            def advisory = line.split(":")[1].trim()
+
+                            // Check if the advisory mentions a valid beta version
+                            if (advisory ==~ betaRegex) {
+                                echo "Vulnerability found with beta fix, ignoring: ${advisory}"
+                            } else if (advisory.contains("rc") || !(advisory ==~ betaRegex)) {
                                 // Fail for stable or release candidate versions
-                                echo "Vulnerability found with stable or release candidate fix: ${line}"
+                                echo "Vulnerability found with stable or release candidate fix: ${advisory}"
                                 failPipeline = true
                             }
                         }
                     }
 
-                    // Fail the pipeline if there are any stable or release candidate fixes
+                    // Fail the pipeline if any stable or rc vulnerabilities were found
                     if (failPipeline) {
-                        error "Pipeline failed due to vulnerabilities with stable or rc fixes."
+                        error "Pipeline failed due to vulnerabilities with stable or rc fixes available."
                     } else {
                         echo "No blocking vulnerabilities found. Proceeding with pipeline."
                     }
