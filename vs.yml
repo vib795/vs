@@ -10,66 +10,31 @@ stages {
                         pip install safety
                     '''
 
-                    // Run safety check, capture output, but don't fail on non-zero exit code
+                    // Run safety check and capture the console output in-memory
                     def safetyOutput = sh(script: '''
                         ./virtualenv/bin/safety check -r requirements.txt
-                    ''', returnStatus: true, returnStdout: true).trim()
+                    ''', returnStdout: true).trim()
 
-                    // Variables to track whether the pipeline should fail
+                    // Variable to track whether the pipeline should fail
                     def failPipeline = false
-                    def vulnerabilityId = ''
-                    def affectedSpec = ''
-                    def advisory = ''
-                    def pve = ''
-                    def moreInfoUrl = ''
 
-                    // Parse the output of the safety check
+                    // Parse the safety output line-by-line
                     safetyOutput.eachLine { line ->
-                        if (line.contains("Vulnerability ID:")) {
-                            vulnerabilityId = line.split(":")[1].trim()
-                        } else if (line.contains("Affected spec:")) {
-                            affectedSpec = line.split(":")[1].trim()
-                        } else if (line.contains("ADVISORY:")) {
-                            advisory = line.split(":")[1].trim()
-                        } else if (line.contains("PVE -")) {
-                            pve = line.split(":")[1].trim()
-                        } else if (line.contains("For more information about this vulnerability,")) {
-                            moreInfoUrl = line.split("visit")[1].trim()
-                        }
-
-                        // Once we have all vulnerability details, decide if the pipeline should fail
-                        if (line.contains("To ignore this vulnerability")) {
-
-                            // Log the details (optional)
-                            echo """
-                            Vulnerability ID: ${vulnerabilityId}
-                            Affected spec: ${affectedSpec}
-                            Advisory: ${advisory}
-                            PVE: ${pve}
-                            More Info: ${moreInfoUrl}
-                            """
-
-                            // Check if the advisory mentions a beta version ('b')
-                            if (advisory.contains("b")) {
-                                echo "Vulnerability found but only beta fix available: ${advisory}"
-                            } else if (advisory.contains("rc") || !advisory.contains("b")) {
+                        if (line.contains("Vulnerability found")) {
+                            // Identify if the resolution is a beta version ('b')
+                            if (line.contains("b")) {
+                                echo "Vulnerability found with beta fix, ignoring: ${line}"
+                            } else if (line.contains("rc") || !line.contains("b")) {
                                 // Fail for stable or release candidate versions
-                                echo "Vulnerability found with stable or release candidate fix: ${advisory}"
+                                echo "Vulnerability found with stable or release candidate fix: ${line}"
                                 failPipeline = true
                             }
-
-                            // Clear variables for the next vulnerability
-                            vulnerabilityId = ''
-                            affectedSpec = ''
-                            advisory = ''
-                            pve = ''
-                            moreInfoUrl = ''
                         }
                     }
 
-                    // Fail the pipeline if there are any vulnerabilities with stable or rc fixes
+                    // Fail the pipeline if there are any stable or release candidate fixes
                     if (failPipeline) {
-                        error "Pipeline failed due to vulnerabilities with stable or rc fixes available."
+                        error "Pipeline failed due to vulnerabilities with stable or rc fixes."
                     } else {
                         echo "No blocking vulnerabilities found. Proceeding with pipeline."
                     }
