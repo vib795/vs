@@ -10,12 +10,12 @@ stages {
                         pip install safety
                     '''
 
-                    // Run safety check and capture the console output
+                    // Run safety check, capture output, but don't fail on non-zero exit code
                     def safetyOutput = sh(script: '''
                         ./virtualenv/bin/safety check -r requirements.txt
-                    ''', returnStdout: true).trim()
+                    ''', returnStatus: true, returnStdout: true).trim()
 
-                    // Variables to track failure status
+                    // Variables to track whether the pipeline should fail
                     def failPipeline = false
                     def vulnerabilityId = ''
                     def affectedSpec = ''
@@ -23,7 +23,7 @@ stages {
                     def pve = ''
                     def moreInfoUrl = ''
 
-                    // Parse the console output line-by-line
+                    // Parse the output of the safety check
                     safetyOutput.eachLine { line ->
                         if (line.contains("Vulnerability ID:")) {
                             vulnerabilityId = line.split(":")[1].trim()
@@ -40,7 +40,7 @@ stages {
                         // Once we have all vulnerability details, decide if the pipeline should fail
                         if (line.contains("To ignore this vulnerability")) {
 
-                            // Log the details in the console (optional)
+                            // Log the details (optional)
                             echo """
                             Vulnerability ID: ${vulnerabilityId}
                             Affected spec: ${affectedSpec}
