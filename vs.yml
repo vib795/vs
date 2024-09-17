@@ -18,18 +18,21 @@ stage('Security Scan') {
 
                     // Process the safety output
                     def failPipeline = false
-                    def betaRegEx = /[a-zA-Z0-9.]*b[a-zA-Z0-9.]*/
+                    def betaRegEx = /\d+(\.\d+)*b\d*/
+                    def vulnerabilityFound = false
 
                     safetyOutput.split('\n').each { line ->
-                        if (line.contains("ADVISORY:")) {
-                            def advisory = line.split(":")[1].trim()
-
+                        if (line.startsWith('-> ')) {
+                            vulnerabilityFound = true
+                        } else if (vulnerabilityFound && line.trim().startsWith('ADVISORY:')) {
+                            def advisory = line.split(':')[1].trim()
                             if (advisory =~ betaRegEx) {
-                                echo "Vulnerability found with beta fix, ignoring: ${advisory}"
+                                echo "Vulnerability found with beta fix, ignoring: ${line}"
                             } else if (advisory.contains("rc") || !(advisory =~ betaRegEx)) {
-                                echo "Vulnerability found with stable or release candidate fix: ${advisory}"
+                                echo "Vulnerability found with stable or release candidate fix: ${line}"
                                 failPipeline = true
                             }
+                            vulnerabilityFound = false
                         }
                     }
 
