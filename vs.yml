@@ -1,26 +1,48 @@
-stage('Safety Check') {
+stage('Security Scan') {
     steps {
-        script {
-            def safetyCommand = "safety check -r requirements.txt"
-            
-            def safetyOutput = sh(script: safetyCommand, returnStdout: true).trim()
-            
-            // Filter out beta version fixes
-            def nonBetaVulnerabilities = sh(script: """
-                echo '${safetyOutput}' | grep -v -E '\\bb[0-9]*\\b'
-            """, returnStdout: true).trim()
-            
-            def vulnerabilityCount = sh(script: """
-                echo '${nonBetaVulnerabilities}' | grep -c '^\\[\\!'
-            """, returnStdout: true).trim() as Integer
-            
-            if (vulnerabilityCount > 0) {
-                error "Safety check failed due to ${vulnerabilityCount} non-beta vulnerabilities"
-            } else {
-                echo "Safety check passed (ignoring beta version fixes)"
+        container('ubn22-python-tox') {
+            script {
+                // Create a temporary directory
+                def tempDir = sh(script: 'mktemp -d', returnStdout: true).trim()
+                
+                try {
+                    // Setup virtual environment and install safety in the temp directory
+                    sh """
+                        python3.9 -m venv ${tempDir}/venv
+                        . ${tempDir}/venv/bin/activate
+                        pip install safety
+                    """
+
+                    // Run safety check and capture output
+                    def safetyOutput = sh(script: ". ${tempDir}/venv/bin/activate && safety check -r requirements.txt", returnStdout: true).trim()
+
+                    // Process the safety output
+                    def failPipeline = false
+                    def betaRegEx = /[a-zA-Z0-9.]*b[a-zA-Z0-9.]*/
+
+                    safetyOutput.split('\n').each { line ->
+                        if (line.contains("ADVISORY:")) {
+                            def advisory = line.split(":")[1].trim()
+
+                            if (advisory =~ betaRegEx) {
+                                echo "Vulnerability found with beta fix, ignoring: ${advisory}"
+                            } else if (advisory.contains("rc") || !(advisory =~ betaRegEx)) {
+                                echo "Vulnerability found with stable or release candidate fix: ${advisory}"
+                                failPipeline = true
+                            }
+                        }
+                    }
+
+                    if (failPipeline) {
+                        error "Pipeline failed due to vulnerability with stable or rc fixes available."
+                    } else {
+                        echo "No blocking vulnerabilities found. Proceeding with the pipeline."
+                    }
+                } finally {
+                    // Clean up the temporary directory
+                    sh "rm -rf ${tempDir}"
+                }
             }
-            
-            echo "Full safety check output:\n${safetyOutput}"
         }
     }
 }
